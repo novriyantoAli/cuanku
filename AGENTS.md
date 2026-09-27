@@ -44,10 +44,15 @@ Integration tests that need a database **skip** when `DATABASE_URL` is unset, so
 passes on a workstation that cannot reach the VM. A skip is not a pass: run `make migrate-up` and
 `make test-integration` at least once per session that touches persistence.
 
-DB credentials come from either `backend/.env` (git-ignored, and the Makefile sources it with the
-shell) or an exported `DATABASE_URL`. The DSN is a URL, so special characters in the password must
-be percent-encoded — a raw `#` is parsed as a fragment and fails with
-`invalid port ":p" after host`; see the note in `backend/.env.example`.
+DB credentials come from either an exported `DATABASE_URL` or `backend/.env` (git-ignored, and the
+Makefile sources it with the shell). **The exported value wins** over the file — same rule as
+direnv and docker compose — so a blank line in `.env` cannot clobber a working export. When neither
+is set, `make` names the file it checked and whether the `DATABASE_URL` line is commented out,
+empty, or absent, rather than printing a generic error.
+
+The DSN is a URL, so special characters in the password must be percent-encoded — a raw `#` is
+parsed as a fragment and fails with `invalid port ":p" after host`; see the note in
+`backend/.env.example`.
 
 `golangci-lint` on this work machine is a stub that reports no issues for any input. Do not trust
 it for local verification — use `go vet`, `staticcheck`, and `gofmt`/`goimports` locally and let CI
@@ -58,9 +63,7 @@ run the real golangci-lint.
 - The DSN is read from `DATABASE_URL` and nothing else. There is no default for it anywhere: an
   unset DSN fails at startup with a message naming the variable. Do not reintroduce one.
 - No secret or DSN may be committed. `.env` files are git-ignored; `.env.example` is not. The
-  GitHub repository is **public**, so this matters more than usual. `backend/.env.example` leaves
-  `DATABASE_URL` commented out on purpose: an empty assignment in a copied `.env` would override a
-  value exported for the shell.
+  GitHub repository is **public**, so this matters more than usual.
 - Frontend server-only configuration (`BACKEND_URL`) lives in `lib/config/server-env.ts`; anything
   the browser may see lives in `lib/config/env.ts` and carries a `PUBLIC_` prefix. Importing a
   private env module from a component breaks the client build — that is why the two files are

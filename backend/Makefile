@@ -9,19 +9,43 @@ MIGRATION_BIN := $(BIN_DIR)/cuanku-migration
 # quotes, `$` and line continuations mean what they mean in a shell, and make's
 # `include` would interpret `$` as a make variable reference.
 #
+# Precedence: an exported DATABASE_URL wins over the file. The file is ambient
+# configuration; an exported value is a deliberate, session-specific override —
+# and it means a blank `DATABASE_URL=` left in .env cannot clobber a working
+# export. This matches how direnv and docker compose behave.
+#
+# A trailing carriage return is stripped, so a .env edited on Windows works.
+#
+# Nothing here hardcodes a DSN: a missing value fails with instructions naming
+# the exact file that was checked, instead of connecting somewhere unexpected
+# (AGENTS.md).
+#
 # NOTE: characters special to URLs are a separate matter — see the encoding note
 # in .env.example. `#` in a password still has to be percent-encoded, because
 # the DSN parser reads it as the start of a fragment.
-#
-# Nothing here hardcodes a DSN — the file is git-ignored and a missing value
-# fails with instructions instead of connecting somewhere unexpected (AGENTS.md).
 define with_dsn
+__dsn_from_env="$${DATABASE_URL:-}"; \
 set -a; if [ -f ./.env ]; then . ./.env; fi; set +a; \
+if [ -n "$$__dsn_from_env" ]; then DATABASE_URL="$$__dsn_from_env"; fi; \
+unset __dsn_from_env; \
+DATABASE_URL="$${DATABASE_URL%$$'\r'}"; export DATABASE_URL; \
 if [ -z "$$DATABASE_URL" ]; then \
-	echo "DATABASE_URL is not set."; \
-	echo "Either put it in backend/.env (git-ignored; see .env.example), or export it:"; \
-	echo "  export DATABASE_URL='postgres://user:pass@<vm-address>:5432/<database>?sslmode=disable'"; \
-	exit 1; \
+if [ -f ./.env ] && grep -qE '^[[:space:]]*#[[:space:]]*DATABASE_URL=' ./.env; then \
+echo "DATABASE_URL is not set: $${PWD}/.env has a DATABASE_URL line that is still commented out."; \
+echo "Remove the leading '#' and fill it in:"; \
+elif [ -f ./.env ] && grep -qE '^[[:space:]]*DATABASE_URL=[[:space:]]*$$' ./.env; then \
+echo "DATABASE_URL is still empty in $${PWD}/.env."; \
+echo "Fill that line in (or export DATABASE_URL, which wins over the file):"; \
+elif [ -f ./.env ]; then \
+echo "DATABASE_URL is not set: $${PWD}/.env exists but has no DATABASE_URL line."; \
+echo "Add one (an exported DATABASE_URL also works, and wins over the file):"; \
+else \
+echo "DATABASE_URL is not set, and $${PWD}/.env does not exist."; \
+echo "Either copy .env.example to .env and fill it in, or export DATABASE_URL:"; \
+echo "  cp .env.example .env"; \
+fi; \
+echo "  DATABASE_URL=postgres://user:pass@<vm-address>:5432/<database>?sslmode=disable"; \
+exit 1; \
 fi; \
 $(1)
 endef

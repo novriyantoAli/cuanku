@@ -38,11 +38,15 @@ praktis:
 ```bash
 cd backend
 cp .env.example .env && chmod 600 .env
-$EDITOR .env            # isi DATABASE_URL (file ini git-ignored)
+# buka .env, isi baris DATABASE_URL= yang masih kosong
 
 make verify-db       # SATU perintah: cek koneksi, migrasi ×2, tes integrasi, API + frontend health
 make run             # API di :8080
 ```
+
+**Presedensi:** `DATABASE_URL` yang di-`export` menang atas `.env`. File itu konfigurasi ambient;
+nilai yang di-export adalah override sadar untuk satu sesi — aturan yang sama dengan `direnv` dan
+`docker compose`, dan artinya baris kosong di `.env` tidak bisa menimpa export yang sudah jalan.
 
 `make verify-db` menjalankan `scripts/verify-db.sh`: membuktikan DSN tembus, menerapkan migrasi dua
 kali (yang kedua harus `applied: false`), menjalankan tes integrasi terhadap database sungguhan,
@@ -51,8 +55,9 @@ PostgreSQL. Outputnya difilter sehingga DSN tidak bisa bocor saat ditempel ke is
 Target yang lebih kecil: `make check-db`, `make migrate-up`, `make migrate-version`,
 `make test-integration`.
 
-Makefile membaca `.env` otomatis, jadi `export DATABASE_URL=...` juga jalan (file menang bila
-keduanya ada). `make help` mencantumkan semua target.
+Makefile membaca `.env` otomatis, sehingga `export DATABASE_URL=...` juga jalan (dan menang bila
+keduanya ada). `make help` mencantumkan semua target. Kalau DSN belum terbaca, `make` menyebutkan
+file mana yang ia periksa dan apakah barisnya masih dikomentari, kosong, atau tidak ada.
 
 > **Encoding:** DSN adalah URL, jadi karakter khusus URL harus di-*percent-encode* di dalam
 > password (`#` → `%23`, `@` → `%40`, `:` → `%3A`, `/` → `%2F`, `?` → `%3F`). `#` mentah dibaca
