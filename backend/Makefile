@@ -4,14 +4,27 @@ BIN_DIR := bin
 API_BIN := $(BIN_DIR)/cuanku-api
 MIGRATION_BIN := $(BIN_DIR)/cuanku-migration
 
-# Never hardcode a DSN here: this guard fails fast with a useful message
-# instead of silently connecting somewhere unexpected (AGENTS.md).
-require-dsn:
-	@if [ -z "$$DATABASE_URL" ]; then \
-		echo "DATABASE_URL is not set. Export the dev DSN first, e.g."; \
-		echo "  export DATABASE_URL='postgres://user:pass@<vm-host>:5432/cuanku?sslmode=disable'"; \
-		exit 1; \
-	fi
+# Every database-touching recipe is wrapped in this. It sources ./.env with the
+# *shell* rather than make's own `include`, because a .env file is shell syntax:
+# quotes, `$` and line continuations mean what they mean in a shell, and make's
+# `include` would interpret `$` as a make variable reference.
+#
+# NOTE: characters special to URLs are a separate matter — see the encoding note
+# in .env.example. `#` in a password still has to be percent-encoded, because
+# the DSN parser reads it as the start of a fragment.
+#
+# Nothing here hardcodes a DSN — the file is git-ignored and a missing value
+# fails with instructions instead of connecting somewhere unexpected (AGENTS.md).
+define with_dsn
+set -a; if [ -f ./.env ]; then . ./.env; fi; set +a; \
+if [ -z "$$DATABASE_URL" ]; then \
+	echo "DATABASE_URL is not set."; \
+	echo "Either put it in backend/.env (git-ignored; see .env.example), or export it:"; \
+	echo "  export DATABASE_URL='postgres://user:pass@<vm-address>:5432/<database>?sslmode=disable'"; \
+	exit 1; \
+fi; \
+$(1)
+endef
 
 .PHONY: help
 help:
@@ -35,35 +48,39 @@ build-migration: ## Build the migration runner binary
 	go build -trimpath -o $(MIGRATION_BIN) ./cmd/migration
 
 .PHONY: run
-run: ## Run the API server (requires DATABASE_URL)
-	$(MAKE) require-dsn
-	go run ./cmd/api
+run: ## Run the API server (DSN from ./.env or the environment)
+	@$(call with_dsn,go run ./cmd/api)
 
 .PHONY: run-migration
-run-migration: ## Apply all pending migrations (requires DATABASE_URL)
-	$(MAKE) require-dsn
-	go run ./cmd/migration -direction=up
+run-migration: ## Apply all pending migrations (DSN from ./.env or the environment)
+	@$(call with_dsn,go run ./cmd/migration -direction=up)
 
 .PHONY: migrate-up
 migrate-up: run-migration ## Alias for run-migration
 
 .PHONY: migrate-down
-migrate-down: ## Roll back one migration (requires DATABASE_URL)
-	$(MAKE) require-dsn
-	go run ./cmd/migration -direction=down -steps=1
+migrate-down: ## Roll back one migration (DSN from ./.env or the environment)
+	@$(call with_dsn,go run ./cmd/migration -direction=down -steps=1)
 
 .PHONY: migrate-version
-migrate-version: ## Print the current schema version (requires DATABASE_URL)
-	$(MAKE) require-dsn
-	go run ./cmd/migration -direction=version
+migrate-version: ## Print the current schema version (DSN from ./.env or the environment)
+	@$(call with_dsn,go run ./cmd/migration -direction=version)
 
 .PHONY: test
 test: ## Run every test
 	go test ./... -count=1
 
 .PHONY: test-unit
-test-unit: ## Run unit tests only
+test-unit: ## Run unit tests only (database integration tests skip)
 	go test ./internal/... ./cmd/... -count=1
+
+.PHONY: test-integration
+test-integration: ## Run the database integration tests (DSN from ./.env or the environment)
+	@$(call with_dsn,go test ./internal/pkg/migrator/... -count=1 -v -run 'TestUp|TestVersion')
+
+.PHONY: check-db
+check-db: ## Prove the DSN reaches PostgreSQL, then report the schema version
+	@$(call with_dsn,go run ./cmd/migration -direction=version)
 
 .PHONY: test-coverage
 test-coverage: ## Run tests with a coverage report
@@ -98,10 +115,9 @@ docker-build: ## Build the API image (needs a container runtime; none on the dev
 	docker build -t cuanku-api:$(shell git rev-parse --short HEAD) .
 
 .PHONY: docker-run
-docker-run: ## Run the API image (requires DATABASE_URL in the environment)
-	$(MAKE) require-dsn
+docker-run: ## Run the API image (DSN from ./.env or the environment)
 	@command -v docker >/dev/null 2>&1 || { echo "docker is not installed on this machine (see AGENTS.md)"; exit 1; }
-	docker run --rm -p $(or $(PORT),8080):8080 -e DATABASE_URL -e APP_ENV -e LOGGER_LEVEL cuanku-api:latest
+	@$(call with_dsn,docker run --rm -p $${PORT:-8080}:8080 -e DATABASE_URL -e APP_ENV -e LOGGER_LEVEL cuanku-api:latest)
 
 .PHONY: ci
 ci: build vet test lint ## What CI runs

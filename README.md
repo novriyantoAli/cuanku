@@ -32,22 +32,37 @@ Keduanya adalah aplikasi terpisah dengan toolchain terpisah: `make` di `backend/
 
 ## Backend
 
-DSN **selalu** dari environment; tidak ada alamat atau kredensial yang di-hardcode:
+DSN **selalu** dari environment; tidak ada alamat atau kredensial yang di-hardcode. Cara paling
+praktis:
 
 ```bash
 cd backend
-export DATABASE_URL='postgres://<user>:<pass>@<vm-host>:5432/cuanku?sslmode=disable'
+cp .env.example .env && chmod 600 .env
+$EDITOR .env            # isi DATABASE_URL (file ini git-ignored)
 
+make check-db        # membuktikan DSN tembus + versi skema saat ini
 make migrate-up      # menerapkan migrasi (idempoten)
-make migrate-version # versi skema saat ini
+make test-integration # tes migrator terhadap database sungguhan
 make run             # API di :8080
 ```
 
-`make help` mencantumkan semua target. Verifikasi sebelum menyerahkan pekerjaan:
+Makefile membaca `.env` otomatis, jadi `export DATABASE_URL=...` juga jalan (file menang bila
+keduanya ada). `make help` mencantumkan semua target.
+
+> **Encoding:** DSN adalah URL, jadi karakter khusus URL harus di-*percent-encode* di dalam
+> password (`#` → `%23`, `@` → `%40`, `:` → `%3A`, `/` → `%2F`, `?` → `%3F`). `#` mentah dibaca
+> sebagai awal *fragment* oleh parser dan gagal dengan `invalid port ":p" after host`. Ini bukan
+> perilaku `make` — parser DSN-nya memang begitu. Paling mudah: pakai password dev tanpa karakter
+> khusus.
+
+Verifikasi sebelum menyerahkan pekerjaan:
 
 ```bash
 make build && make test && make lint   # atau: make ci
 ```
+
+`make test` melewati (skip) dua tes integrasi yang butuh database bila DSN tidak ada — `make test-integration`
+yang menjalankannya secara eksplisit.
 
 Health check:
 

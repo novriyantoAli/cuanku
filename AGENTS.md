@@ -30,13 +30,20 @@ run there.
 
 ```bash
 cd backend  && make ci          # build + vet + test + golangci-lint
-cd backend  && make migrate-up  # needs DATABASE_URL; idempotent, safe to re-run
+cd backend  && make check-db    # needs the DSN (.env or exported); idempotent, safe to re-run
+cd backend  && make migrate-up
+cd backend  && make test-integration
 cd frontend && pnpm check && pnpm lint && pnpm test && pnpm build
 ```
 
 Integration tests that need a database **skip** when `DATABASE_URL` is unset, so `make test` still
 passes on a workstation that cannot reach the VM. A skip is not a pass: run `make migrate-up` and
-the integration tests at least once per session that touches persistence.
+`make test-integration` at least once per session that touches persistence.
+
+DB credentials come from either `backend/.env` (git-ignored, and the Makefile sources it with the
+shell) or an exported `DATABASE_URL`. The DSN is a URL, so special characters in the password must
+be percent-encoded — a raw `#` is parsed as a fragment and fails with
+`invalid port ":p" after host`; see the note in `backend/.env.example`.
 
 `golangci-lint` on this work machine is a stub that reports no issues for any input. Do not trust
 it for local verification — use `go vet`, `staticcheck`, and `gofmt`/`goimports` locally and let CI
@@ -47,7 +54,9 @@ run the real golangci-lint.
 - The DSN is read from `DATABASE_URL` and nothing else. There is no default for it anywhere: an
   unset DSN fails at startup with a message naming the variable. Do not reintroduce one.
 - No secret or DSN may be committed. `.env` files are git-ignored; `.env.example` is not. The
-  GitHub repository is **public**, so this matters more than usual.
+  GitHub repository is **public**, so this matters more than usual. `backend/.env.example` leaves
+  `DATABASE_URL` commented out on purpose: an empty assignment in a copied `.env` would override a
+  value exported for the shell.
 - Frontend server-only configuration (`BACKEND_URL`) lives in `lib/config/server-env.ts`; anything
   the browser may see lives in `lib/config/env.ts` and carries a `PUBLIC_` prefix. Importing a
   private env module from a component breaks the client build — that is why the two files are
