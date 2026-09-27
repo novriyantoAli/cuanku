@@ -1,0 +1,41 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - funlen
+    - gocyclo
+    - gosec
+    - govet
+    - ineffassign
+    - lll
+    - misspell
+    - staticcheck
+    - unused
+  settings:
+    funlen:
+      lines: 80
+      statements: 50
+    gocyclo:
+      min-complexity: 15
+    lll:
+      line-length: 120
+      tab-width: 1
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/novriyantoAli/cuanku/backend
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

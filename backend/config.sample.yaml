@@ -1,0 +1,33 @@
+# Optional configuration file. Every key here can be overridden by the
+# environment variable named in the comment, which is the preferred way to
+# configure a deployment (see .env.example).
+#
+# Copy to config.yaml (git-ignored) only when you need file-based config.
+# NOTE: database.url has no default anywhere in the codebase — the DSN must
+# come from the DATABASE_URL environment variable (AGENTS.md).
+
+app:
+  name: cuanku-api
+  env: development # APP_ENV
+  version: 0.1.0 # APP_VERSION
+
+server:
+  host: 0.0.0.0 # SERVER_HOST
+  port: 8080 # PORT
+  read_timeout: 15s
+  write_timeout: 30s
+  shutdown_timeout: 10s
+
+database:
+  # url: ""            # DATABASE_URL — set it in the environment, not here
+  max_open_conns: 25
+  max_idle_conns: 5
+  conn_max_lifetime: 1h
+  connect_timeout: 5s
+
+logger:
+  level: info # LOGGER_LEVEL
+
+cors:
+  allowed_origins: # CORS_ALLOWED_ORIGINS (comma-separated)
+    - http://localhost:5173

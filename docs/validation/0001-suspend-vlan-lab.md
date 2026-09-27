@@ -247,7 +247,7 @@ FROM radacct ORDER BY acctstarttime DESC LIMIT 5;
 
 Untuk setiap uji, catat empat hal: **perintah yang dijalankan**, **keluaran verbatim yang relevan**, **lulus/gagal**, dan **apa yang berubah di dokumen** bila gagal.
 
-Hasilnya ditulis ke `docs/validation/0002-hasil-validasi-<tanggal>.md`, lalu:
+Hasilnya ditulis ke `docs/validation/0002-hasil-validasi-<tanggal>.md` (berkas kosong untuk sesi 2026-09-27 sudah disiapkan di `docs/validation/0002-hasil-validasi-2026-09-27.md`), lalu:
 
 - Perbarui klausul ADR yang terbantah (jangan diamkan).
 - Tutup bagian yang relevan di issue #24, dan komentari #14 bila hasil uji E mengubah keputusan PMKSA.

@@ -1,0 +1,112 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend — build, lint, test, migrate
+    runs-on: ubuntu-latest
+
+    # A real PostgreSQL, so the migration runner and the integration tests run
+    # against something that behaves like the dev database. Nothing here is a
+    # credential for anything real: it exists only inside this runner.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: cuanku
+          POSTGRES_PASSWORD: cuanku
+          POSTGRES_DB: cuanku_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cuanku -d cuanku_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgres://cuanku:cuanku@127.0.0.1:5432/cuanku_test?sslmode=disable
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.14.0
+          working-directory: backend
+
+      # The migration path is an acceptance criterion of its own, so CI runs it:
+      # once against an empty database, then again to prove the re-run is a no-op.
+      - name: Migrate a fresh database
+        run: go run ./cmd/migration -direction=up
+
+      - name: Migrate again (must be a no-op)
+        run: |
+          go run ./cmd/migration -direction=up | tee /tmp/migrate-second.log
+          grep -q "applied: false" /tmp/migrate-second.log
+
+      - name: Report schema version
+        run: go run ./cmd/migration -direction=version
+
+      - name: Test
+        run: go test ./... -count=1 -race
+
+  frontend:
+    name: Frontend — check, lint, test, build
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm check
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
