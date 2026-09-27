@@ -98,6 +98,8 @@ func (s *Server) start(_ context.Context) error {
 		return fmt.Errorf("listen on %s: %w", s.http.Addr, err)
 	}
 
+	// Log the address the listener actually got, not the configured one: with
+	// port 0 they differ, and the log is how anyone finds out which one it is.
 	s.logger.Info("http server starting",
 		zap.String("addr", listener.Addr().String()),
 		zap.String("env", s.cfg.Env()),

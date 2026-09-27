@@ -41,11 +41,36 @@ bad() {
 }
 
 # Shows why a server did not answer, instead of leaving the failure unexplained.
+# Prints the WHOLE log (up to a cap) plus its line count: a tail is how a previous
+# run of this script hid the two facts that mattered — that the process was still
+# alive, and that Fx had logged no constructor runs at all.
 show_log() {
-	local label="$1" log="$2"
-	printf '\n--- %s log (last 30 lines) ---\n' "$label"
-	tail -n 30 "$log" 2>/dev/null | redact
+	local label="$1" log="$2" lines
+	lines="$(wc -l <"$log" 2>/dev/null || echo 0)"
+	printf '\n--- %s log (%s lines%s) ---\n' "$label" "$lines" "$([[ "$lines" -gt 100 ]] && echo ', last 100')"
+	tail -n 100 "$log" 2>/dev/null | redact
 	printf -- '--- end of %s log ---\n' "$label"
+}
+
+# Reports whether the process survived and what is listening on its port. "The API
+# did not answer" has two very different causes — a dead process, and a live
+# process with no listener — and they need different fixes.
+show_process() {
+	local label="$1" pid="$2" port="$3"
+
+	printf '\n--- %s process state ---\n' "$label"
+	if ps -o pid=,stat=,etime=,cmd= -p "$pid" 2>/dev/null; then
+		printf 'alive\n'
+	else
+		printf 'NOT RUNNING (pid %s no longer exists)\n' "$pid"
+	fi
+
+	printf -- '--- listeners on :%s ---\n' "$port"
+	if command -v ss >/dev/null 2>&1; then
+		ss -ltnp 2>/dev/null | grep -E "[:.]${port}[[:space:]]" || printf 'nothing is listening on :%s\n' "$port"
+	else
+		printf 'ss not available\n'
+	fi
 }
 
 # Starts a command in its own process group so cleanup can kill the whole tree
@@ -70,7 +95,8 @@ stop_server() {
 	printf '[cleanup] stopped pid %s\n' "$pid"
 }
 
-http_code() { curl -s -o /dev/null -w '%{http_code}' "$1" 2>/dev/null; }
+# Bounded, so a hung request returns quickly instead of stalling the wait loop.
+http_code() { curl -s --max-time 3 -o /dev/null -w '%{http_code}' "$1" 2>/dev/null; }
 
 # Waits for a URL to answer with any HTTP status. Echoes the status code, or 000.
 wait_for_http() {
@@ -156,6 +182,7 @@ API_PID="$(start_server "$API_LOG" ./bin/cuanku-api)"
 code="$(wait_for_http "http://127.0.0.1:${API_PORT}/healthz")"
 if [[ "$code" == "000" ]]; then
 	bad "API did not answer on :${API_PORT} within ${WAIT_SECONDS}s"
+	show_process "api" "$API_PID" "$API_PORT"
 	show_log "api" "$API_LOG"
 else
 	printf 'GET /healthz -> HTTP %s\n' "$code"
@@ -194,6 +221,7 @@ else
 	code="$(wait_for_http "http://127.0.0.1:${WEB_PORT}/api/health")"
 	if [[ "$code" == "000" ]]; then
 		bad "frontend did not answer on :${WEB_PORT} within ${WAIT_SECONDS}s"
+		show_process "frontend" "$WEB_PID" "$WEB_PORT"
 		show_log "frontend" "$WEB_LOG"
 	else
 		body="$(curl -s "http://127.0.0.1:${WEB_PORT}/api/health" | redact)"

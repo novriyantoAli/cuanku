@@ -19,4 +19,12 @@ var Module = fx.Options(
 		health.NewHandler,
 		NewServer,
 	),
+	// Fx constructs only the providers some Invoke needs. Without this, nothing
+	// ever asks for *Server, so NewServer never runs, its fx.Hook is never
+	// registered, Start() has nothing to start, and the process sits there
+	// printing "[Fx] RUNNING" while listening on nothing. Asking for the value
+	// here makes "include this module" and "start this server" the same thing —
+	// so an entrypoint cannot forget it, and a test that composes the module
+	// exercises the real startup path.
+	fx.Invoke(func(*Server) {}),
 )
