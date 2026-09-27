@@ -82,6 +82,10 @@ test-integration: ## Run the database integration tests (DSN from ./.env or the 
 check-db: ## Prove the DSN reaches PostgreSQL, then report the schema version
 	@$(call with_dsn,go run ./cmd/migration -direction=version)
 
+.PHONY: verify-db
+verify-db: ## Prove the DSN works end to end: migrate, integration tests, API + frontend health
+	@$(call with_dsn,./scripts/verify-db.sh)
+
 .PHONY: test-coverage
 test-coverage: ## Run tests with a coverage report
 	go test ./... -count=1 -coverprofile=coverage.out

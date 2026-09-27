@@ -40,11 +40,16 @@ cd backend
 cp .env.example .env && chmod 600 .env
 $EDITOR .env            # isi DATABASE_URL (file ini git-ignored)
 
-make check-db        # membuktikan DSN tembus + versi skema saat ini
-make migrate-up      # menerapkan migrasi (idempoten)
-make test-integration # tes migrator terhadap database sungguhan
+make verify-db       # SATU perintah: cek koneksi, migrasi ×2, tes integrasi, API + frontend health
 make run             # API di :8080
 ```
+
+`make verify-db` menjalankan `scripts/verify-db.sh`: membuktikan DSN tembus, menerapkan migrasi dua
+kali (yang kedua harus `applied: false`), menjalankan tes integrasi terhadap database sungguhan,
+lalu menyalakan API dan frontend untuk membuktikan jalur browser → `/api/health` → `/healthz` →
+PostgreSQL. Outputnya difilter sehingga DSN tidak bisa bocor saat ditempel ke issue publik.
+Target yang lebih kecil: `make check-db`, `make migrate-up`, `make migrate-version`,
+`make test-integration`.
 
 Makefile membaca `.env` otomatis, jadi `export DATABASE_URL=...` juga jalan (file menang bila
 keduanya ada). `make help` mencantumkan semua target.

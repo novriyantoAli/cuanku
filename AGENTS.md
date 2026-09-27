@@ -30,11 +30,15 @@ run there.
 
 ```bash
 cd backend  && make ci          # build + vet + test + golangci-lint
-cd backend  && make check-db    # needs the DSN (.env or exported); idempotent, safe to re-run
-cd backend  && make migrate-up
-cd backend  && make test-integration
+cd backend  && make verify-db   # SATU perintah: DSN, migrasi ×2, tes integrasi, health end-to-end
 cd frontend && pnpm check && pnpm lint && pnpm test && pnpm build
 ```
+
+`make verify-db` (`backend/scripts/verify-db.sh`) is the one command that closes the "does it work
+against the real database" question. It never rolls anything back, is safe to re-run, stops the
+servers it starts, and redacts the DSN from its output so the log can be pasted into a public issue.
+Its happy path can only be exercised with a real database — a run that stops at step 1 is reporting
+an unreachable DSN, not a passing script.
 
 Integration tests that need a database **skip** when `DATABASE_URL` is unset, so `make test` still
 passes on a workstation that cannot reach the VM. A skip is not a pass: run `make migrate-up` and
