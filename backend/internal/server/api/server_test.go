@@ -44,7 +44,11 @@ func newTestServer(t *testing.T, pinger health.Pinger) (*api.Server, *recordingL
 	return newTestServerWithConfig(t, testutil.Config(t), pinger)
 }
 
-func newTestServerWithConfig(t *testing.T, cfg *config.Config, pinger health.Pinger) (*api.Server, *recordingLifecycle) {
+func newTestServerWithConfig(
+	t *testing.T,
+	cfg *config.Config,
+	pinger health.Pinger,
+) (*api.Server, *recordingLifecycle) {
 	t.Helper()
 
 	lc := &recordingLifecycle{}

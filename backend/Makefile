@@ -119,13 +119,23 @@ test-coverage: ## Run tests with a coverage report
 vet: ## Run go vet
 	go vet ./...
 
+.PHONY: lint-preflight
+lint-preflight: ## Fail with instructions when the golangci-lint binary is not v2
+	@if ! $(GOLANGCI_LINT) version 2>/dev/null | grep -qE 'version v?2\.'; then \
+		echo "golangci-lint v2 is required: this repo's .golangci.yml is a v2 config."; \
+		echo "Found: $$($(GOLANGCI_LINT) version 2>&1 | head -1)"; \
+		echo "Pass a v2 binary explicitly, for example:"; \
+		echo "  make lint GOLANGCI_LINT=~/.cache/cuanku-tools/golangci-lint"; \
+		exit 1; \
+	fi
+
 .PHONY: lint
-lint: ## Run golangci-lint
-	golangci-lint run ./...
+lint: lint-preflight ## Run golangci-lint (override the binary with GOLANGCI_LINT=/path/to/v2)
+	$(GOLANGCI_LINT) run ./...
 
 .PHONY: lint-fix
-lint-fix: ## Run golangci-lint with fixes
-	golangci-lint run --fix ./...
+lint-fix: lint-preflight ## Run golangci-lint with fixes
+	$(GOLANGCI_LINT) run --fix ./...
 
 .PHONY: format
 format: ## Format with gofmt + goimports
@@ -149,3 +159,8 @@ docker-run: ## Run the API image (DSN from ./.env or the environment)
 
 .PHONY: ci
 ci: build vet test lint ## What CI runs
+
+# Which golangci-lint to run. The one on this work machine's PATH is v1.64.8 and
+# cannot read a v2 config, so `make lint` fails with instructions rather than
+# silently passing. See "Verification gates" in AGENTS.md.
+GOLANGCI_LINT ?= golangci-lint

@@ -12,10 +12,12 @@ import (
 	"github.com/novriyantoAli/cuanku/backend/internal/config"
 )
 
-// testDSN is deliberately a host that means nothing: these tests only assert
-// that viper reads the variable, and a recorded VM address in a test is a
-// hardcoded address in a public repository (AGENTS.md says not to write one down).
-const testDSN = "postgres://user:pass@127.0.0.1:5432/cuanku_test?sslmode=disable"
+// testDSN carries deliberately no userinfo: these tests are about configuration
+// plumbing, not credentials, and a credential-shaped literal is both a gosec G101
+// finding and a bad example in a public repository. The pass-through behaviour
+// that actually matters is covered separately by
+// TestDSNValueIsPassedThroughVerbatim.
+const testDSN = "postgres://127.0.0.1:5432/cuanku_test?sslmode=disable"
 
 func TestLoadReadsDSNFromEnvironment(t *testing.T) {
 	t.Setenv("DATABASE_URL", testDSN)
@@ -85,6 +87,20 @@ func TestCORSOriginsAreSplitAndTrimmedFromEnv(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, []string{"http://localhost:5173", "https://cuanku.example"}, cfg.CORS.AllowedOrigins)
+}
+
+// Viper must hand the DSN through exactly as the environment had it. An earlier
+// version of this test asserted only that *some* value arrived, which cannot fail
+// when viper rewrites the string — and the DSN is a URL, so a rewritten `#`, `$`
+// or `%` is a connection that fails in a way nobody can read.
+func TestDSNValueIsPassedThroughVerbatim(t *testing.T) {
+	const nasty = "not a url: $HOME/still#here?x=%20 & quoted 'value'"
+	t.Setenv("DATABASE_URL", nasty)
+
+	cfg, err := config.Load("")
+	require.NoError(t, err)
+
+	assert.Equal(t, nasty, cfg.Database.URL)
 }
 
 func TestConfigFileIsReadButEnvironmentWins(t *testing.T) {

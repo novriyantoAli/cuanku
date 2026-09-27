@@ -25,8 +25,8 @@ disagree, this repo wins: the deviations are listed under "Scaffold decisions" b
 
 ## Verification gates
 
-Run these before calling any change done. They are what CI runs, so a green run here means a green
-run there.
+Run these before calling any change done. They are what CI runs — with one caveat on this machine:
+`make ci` only matches CI when it is pointed at a golangci-lint v2 binary (see below).
 
 ```bash
 cd backend  && make ci          # build + vet + test + golangci-lint
@@ -54,9 +54,22 @@ The DSN is a URL, so special characters in the password must be percent-encoded 
 parsed as a fragment and fails with `invalid port ":p" after host`; see the note in
 `backend/.env.example`.
 
-`golangci-lint` on this work machine is a stub that reports no issues for any input. Do not trust
-it for local verification — use `go vet`, `staticcheck`, and `gofmt`/`goimports` locally and let CI
-run the real golangci-lint.
+The `golangci-lint` on this work machine's PATH is **v1.64.8**, while this repo's `.golangci.yml` is a
+**v2** config, so it cannot run at all — it exits 3 with
+`you are using a configuration file for golangci-lint v2 with golangci-lint v1`. `make lint` therefore
+fails with instructions instead of passing quietly. CI pins v2.14.0 and is the authority.
+
+Keep a v2 binary outside the PATH lookup and pass it explicitly. On this machine one is at
+`~/.cache/cuanku-tools/golangci-lint` (v2.14.0):
+
+```bash
+make lint GOLANGCI_LINT=~/.cache/cuanku-tools/golangci-lint
+```
+
+Two traps that made this look like "lint passes locally": the linter writes its refusal to stderr, and
+piping it through `tail` hides that; and the `rtk` wrapper on this machine sometimes replaces a
+tool's output with a summary line. **Check exit codes, not just output.** A real run takes seconds and
+has already caught a `lll` violation and a `gosec` G101 that CI charged a full round trip for.
 
 ## Configuration contract
 
