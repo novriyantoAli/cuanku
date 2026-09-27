@@ -13,3 +13,4 @@ Status: accepted
 
 - Webhook/notifikasi gateway dinormalisasi menjadi satu kontrak `Payment` di domain.
 - MVP membutuhkan satu implementasi adapter nyata (dipilih belakangan) + adapter `mock` untuk pengembangan & test.
+- `GraceAccess` **wajib bertenggat**: notifikasi sukses menyalakan layanan tanpa mengkredit `Balance`, tetapi hanya sampai tenggat yang ditetapkan saat notifikasi diterima. Tanpa tenggat, settlement yang hilang berarti layanan menyala selamanya — yaitu internet gratis. Rekonsiliasi settlement/reversal tetap berjalan terhadap `Payment`, bukan terhadap tenggat ini.

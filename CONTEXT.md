@@ -17,8 +17,12 @@ Transaksi penambahan `Balance` `Customer` melalui pembayaran online.
 _Avoid_: Deposit, Isi ulang, Pembayaran, Payment
 
 **Payment**:
-Transaksi pembayaran online (via payment gateway) yang mengonfirmasi sebuah `TopUp`. Memiliki status notifikasi (pending/sukses/gagal) dan `settlementStatus` (pending/settled/reversed). Notifikasi sukses memicu *grace access* (aktif sementara); settlement mengkredit `Balance`; reversal/chargeback mendebit `Balance` dan men-suspend ulang.
+Transaksi pembayaran online (via payment gateway) yang mengonfirmasi sebuah `TopUp`. Memiliki status notifikasi (pending/sukses/gagal) dan `settlementStatus` (pending/settled/reversed). Notifikasi sukses memicu `GraceAccess`; settlement mengkredit `Balance`; reversal/chargeback mendebit `Balance` dan men-suspend ulang.
 _Avoid_: Transaksi, Pembayaran, Invoice, Checkout
+
+**GraceAccess**:
+Keadaan sementara ketika `Payment` sudah melaporkan sukses tetapi settlement belum terjadi: layanan dibuat `Active` tanpa mengkredit `Balance`. Hanya berlaku sampai tenggat yang ditetapkan saat notifikasi sukses diterima; setelah tenggat itu layanan kembali mengikuti `Balance`.
+_Avoid_: Grace period, Masa tenggang, Akses gratis
 
 **Balance**:
 Sisa saldo `Customer` yang menentukan apakah layanan aktif atau tersuspensi. Berkurang sesuai `Tariff` hanya saat ada `Session` aktif (usage-based).
@@ -33,7 +37,7 @@ Paket layanan internet yang dipilih `Customer` (mis. kecepatan bandwidth dan `Ta
 _Avoid_: Paket, Plan, Produk, Bundle, Product
 
 **SubscriptionState**:
-Status layanan `RadiusAccount`: `Active` (`Balance` cukup) atau `Suspended` (`Balance` habis). Menentukan `Vlan` yang dikembalikan FreeRADIUS.
+Status layanan yang dievaluasi per `Customer` lalu diterapkan ke setiap `RadiusAccount` miliknya: `Active` (`Balance` cukup, atau `GraceAccess` sedang berlaku) atau `Suspended` (`Balance` habis tanpa `GraceAccess`). Menentukan `Vlan` yang dikembalikan FreeRADIUS.
 _Avoid_: Status, ServiceStatus, Keadaan layanan
 
 **Vlan**:
@@ -41,7 +45,7 @@ VLAN dinamis yang dikembalikan FreeRADIUS ke AccessPoint. `RadiusAccount` aktif 
 _Avoid_: —
 
 **CaptivePortal**:
-Halaman login/pemberitahuan yang ditampilkan saat `RadiusAccount` berstatus `Suspended`, memberi tahu bahwa masa aktif telah habis dan memungkinkan `TopUp`.
+Halaman pemberitahuan yang ditampilkan saat `RadiusAccount` berstatus `Suspended`, memberi tahu bahwa masa aktif telah habis dan memungkinkan `TopUp`. Mengautentikasi `Customer` lewat OTP; identitas yang disuplai klien (alamat MAC, alamat IP, parameter URL) tidak dipercaya.
 _Avoid_: LoginPage, Portal, Halaman login
 
 **AccessPoint**:
