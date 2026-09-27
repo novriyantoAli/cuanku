@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/fx"
 
+	"github.com/novriyantoAli/cuanku/backend/internal/config"
 	"github.com/novriyantoAli/cuanku/backend/internal/pkg/health"
 	"github.com/novriyantoAli/cuanku/backend/internal/pkg/testutil"
 	"github.com/novriyantoAli/cuanku/backend/internal/server/api"
@@ -39,8 +41,12 @@ func (l *recordingLifecycle) Append(hook fx.Hook) { l.hooks = append(l.hooks, ho
 
 func newTestServer(t *testing.T, pinger health.Pinger) (*api.Server, *recordingLifecycle) {
 	t.Helper()
+	return newTestServerWithConfig(t, testutil.Config(t), pinger)
+}
 
-	cfg := testutil.Config(t)
+func newTestServerWithConfig(t *testing.T, cfg *config.Config, pinger health.Pinger) (*api.Server, *recordingLifecycle) {
+	t.Helper()
+
 	lc := &recordingLifecycle{}
 	checker := health.NewChecker(pinger, health.CheckerConfig{
 		Service: cfg.App.Name,
@@ -81,6 +87,48 @@ func TestHealthzIsMountedAtRoot(t *testing.T) {
 	assert.Equal(t, health.StatusOK, body.Status)
 	assert.Equal(t, "cuanku-test", body.Service)
 	assert.Equal(t, "test", body.Version)
+}
+
+// A port that is already taken must fail the OnStart hook, so the process exits
+// with an error instead of running forever without serving anything.
+func TestStartFailsWhenThePortIsAlreadyTaken(t *testing.T) {
+	blocker, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = blocker.Close() })
+
+	cfg := testutil.Config(t)
+	cfg.Server.Host = "127.0.0.1"
+	cfg.Server.Port = blocker.Addr().(*net.TCPAddr).Port
+
+	_, lc := newTestServerWithConfig(t, cfg, stubPinger{})
+	require.Len(t, lc.hooks, 1)
+
+	err = lc.hooks[0].OnStart(context.Background())
+
+	require.Error(t, err, "binding a taken port must fail startup")
+	assert.Contains(t, err.Error(), "listen on")
+}
+
+// And the happy path: OnStart binds and serves, OnStop releases the port.
+func TestStartBindsAndStopReleasesAnEphemeralPort(t *testing.T) {
+	blocker, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	port := blocker.Addr().(*net.TCPAddr).Port
+	require.NoError(t, blocker.Close())
+
+	cfg := testutil.Config(t)
+	cfg.Server.Host = "127.0.0.1"
+	cfg.Server.Port = port
+
+	server, lc := newTestServerWithConfig(t, cfg, stubPinger{})
+	require.Len(t, lc.hooks, 1)
+
+	require.NoError(t, lc.hooks[0].OnStart(context.Background()))
+
+	rec := get(t, server, "/healthz")
+	assert.Equal(t, http.StatusOK, rec.Code, "OnStart must actually serve traffic")
+
+	require.NoError(t, lc.hooks[0].OnStop(context.Background()))
 }
 
 // Probes must not move when the business API version changes.

@@ -4,10 +4,12 @@
 # migration -> integration tests -> API health check -> frontend proxy -> database.
 #
 # Safe to re-run: the migration is idempotent, nothing is rolled back, and the
-# servers started here are stopped again on exit.
+# servers started here are stopped again on exit (as whole process groups, so a
+# `pnpm dev` cannot outlive the script).
 #
-# Every line of output is passed through a redactor, so a DSN that shows up in a
-# driver error message can still be pasted into a public issue safely.
+# Every line of output — including the servers' own logs — is passed through a
+# redactor, so a DSN that shows up in a driver error message can still be pasted
+# into a public issue safely.
 #
 # Run it through the Makefile so the DSN is loaded from ./.env:
 #     cd backend && make verify-db
@@ -22,6 +24,10 @@ WEB_PORT="${WEB_PORT:-5173}"
 WEB_DIR="$ROOT/../frontend"
 WAIT_SECONDS="${WAIT_SECONDS:-20}"
 
+TMP="$(mktemp -d)"
+API_LOG="$TMP/api.log"
+WEB_LOG="$TMP/web.log"
+
 failure=0
 
 # Masks the userinfo part of any URL, so `postgres://user:pw@host` cannot leak.
@@ -34,21 +40,43 @@ bad() {
 	failure=1
 }
 
-cleanup() {
-	if [[ -n "${API_PID:-}" ]]; then
-		kill "$API_PID" 2>/dev/null && printf '\n[cleanup] stopped api (pid %s)\n' "$API_PID"
-	fi
-	if [[ -n "${WEB_PID:-}" ]]; then
-		kill "$WEB_PID" 2>/dev/null && printf '[cleanup] stopped web (pid %s)\n' "$WEB_PID"
-	fi
+# Shows why a server did not answer, instead of leaving the failure unexplained.
+show_log() {
+	local label="$1" log="$2"
+	printf '\n--- %s log (last 30 lines) ---\n' "$label"
+	tail -n 30 "$log" 2>/dev/null | redact
+	printf -- '--- end of %s log ---\n' "$label"
 }
-trap cleanup EXIT
 
-# Waits for a URL to answer with any HTTP status, then prints it.
+# Starts a command in its own process group so cleanup can kill the whole tree
+# (pnpm -> node -> vite), not just the shell that launched it.
+start_server() {
+	local log="$1"
+	shift
+	if command -v setsid >/dev/null 2>&1; then
+		setsid "$@" >"$log" 2>&1 &
+	else
+		"$@" >"$log" 2>&1 &
+	fi
+	printf '%s' "$!"
+}
+
+stop_server() {
+	local pid="${1:-}"
+	[[ -z "$pid" ]] && return 0
+	# Negative pid targets the process group created by setsid.
+	kill -- "-$pid" 2>/dev/null || kill "$pid" 2>/dev/null
+	wait "$pid" 2>/dev/null
+	printf '[cleanup] stopped pid %s\n' "$pid"
+}
+
+http_code() { curl -s -o /dev/null -w '%{http_code}' "$1" 2>/dev/null; }
+
+# Waits for a URL to answer with any HTTP status. Echoes the status code, or 000.
 wait_for_http() {
 	local url="$1" deadline=$((SECONDS + WAIT_SECONDS)) code
 	while ((SECONDS < deadline)); do
-		code="$(curl -s -o /dev/null -w '%{http_code}' "$url" 2>/dev/null)"
+		code="$(http_code "$url")"
 		if [[ "$code" != "000" && -n "$code" ]]; then
 			printf '%s' "$code"
 			return 0
@@ -58,6 +86,13 @@ wait_for_http() {
 	printf '000'
 	return 1
 }
+
+cleanup() {
+	[[ -n "${WEB_PID:-}" ]] && stop_server "$WEB_PID"
+	[[ -n "${API_PID:-}" ]] && stop_server "$API_PID"
+	rm -rf "$TMP"
+}
+trap cleanup EXIT
 
 if [[ -z "${DATABASE_URL:-}" ]]; then
 	printf 'DATABASE_URL is not set in this shell.\n'
@@ -101,17 +136,27 @@ else
 fi
 
 # 5 ---------------------------------------------------------------------------
-step "5. build + start the API"
+step "5. build + start the API on :${API_PORT}"
+
 if ! make build >/dev/null 2>&1; then
 	bad "backend build failed"
 	exit 1
 fi
-./bin/cuanku-api >/dev/null 2>&1 &
-API_PID=$!
+
+# A port already in use is the single most likely reason this step fails, and
+# waiting 20 s to find out tells nobody anything.
+if [[ "$(http_code "http://127.0.0.1:${API_PORT}/healthz")" != "000" ]]; then
+	bad "something is already serving on :${API_PORT} — stop it, or run with a different port"
+	printf '      PORT=18080 make verify-db   (this script also points the frontend at it)\n'
+	exit 1
+fi
+
+API_PID="$(start_server "$API_LOG" ./bin/cuanku-api)"
 
 code="$(wait_for_http "http://127.0.0.1:${API_PORT}/healthz")"
 if [[ "$code" == "000" ]]; then
 	bad "API did not answer on :${API_PORT} within ${WAIT_SECONDS}s"
+	show_log "api" "$API_LOG"
 else
 	printf 'GET /healthz -> HTTP %s\n' "$code"
 	curl -s "http://127.0.0.1:${API_PORT}/healthz" | redact
@@ -120,28 +165,53 @@ else
 		ok "backend health check is 200 and reports the database"
 	else
 		bad "backend health check returned ${code} (503 means the database is not reachable)"
+		show_log "api" "$API_LOG"
 	fi
 fi
 
 # 6 ---------------------------------------------------------------------------
 step "6. frontend proxy: browser -> SvelteKit /api/health -> Go /healthz -> PostgreSQL"
+
+# The frontend's own default is :8080; if the API runs elsewhere the proxy has to
+# be told, or this step would test a connection to nothing.
+if [[ "$API_PORT" != "8080" ]]; then
+	export BACKEND_URL="http://127.0.0.1:${API_PORT}"
+	printf 'BACKEND_URL=%s (API is not on the default port)\n' "$BACKEND_URL"
+fi
+
 if [[ ! -d "$WEB_DIR/node_modules" ]]; then
 	printf 'skipped: %s/node_modules is missing — run `pnpm install` there first\n' "$WEB_DIR"
 else
-	(cd "$WEB_DIR" && pnpm dev --port "$WEB_PORT" >/dev/null 2>&1) &
-	WEB_PID=$!
+	if [[ "$(http_code "http://127.0.0.1:${WEB_PORT}/api/health")" != "000" ]]; then
+		bad "something is already serving on :${WEB_PORT} — stop it, or run with WEB_PORT=..."
+		exit 1
+	fi
+
+	# --strictPort so vite fails instead of silently moving to :5174, which would
+	# make the check below poll a server this script does not control.
+	WEB_PID="$(start_server "$WEB_LOG" sh -c "cd '$WEB_DIR' && exec pnpm dev --port '$WEB_PORT' --strictPort")"
 
 	code="$(wait_for_http "http://127.0.0.1:${WEB_PORT}/api/health")"
 	if [[ "$code" == "000" ]]; then
 		bad "frontend did not answer on :${WEB_PORT} within ${WAIT_SECONDS}s"
+		show_log "frontend" "$WEB_LOG"
 	else
+		body="$(curl -s "http://127.0.0.1:${WEB_PORT}/api/health" | redact)"
 		printf 'GET /api/health -> HTTP %s\n' "$code"
-		curl -s "http://127.0.0.1:${WEB_PORT}/api/health" | redact
-		printf '\n'
-		if [[ "$code" == "200" ]]; then
-			ok "frontend reached the backend and the backend reached the database"
-		else
+		printf '%s\n' "$body"
+
+		# The proxy answers 200 even when the backend is down — that is the whole
+		# point of its envelope — so 200 alone proves nothing. The body does.
+		if [[ "$code" != "200" ]]; then
 			bad "frontend proxy returned ${code}"
+		elif ! grep -q '"backend_reachable":true' <<<"$body"; then
+			bad "the frontend reached its own proxy, but the proxy could not reach the backend"
+			show_log "frontend" "$WEB_LOG"
+		elif ! grep -q '"database":"up"' <<<"$body"; then
+			bad "the backend answered but its database is not up"
+			show_log "api" "$API_LOG"
+		else
+			ok "frontend -> backend -> database is connected"
 		fi
 	fi
 fi

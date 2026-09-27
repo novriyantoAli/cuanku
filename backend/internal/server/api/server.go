@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -87,14 +88,24 @@ func (s *Server) setupRoutes(healthHandler *health.Handler) {
 }
 
 func (s *Server) start(_ context.Context) error {
+	// Bind explicitly so a taken port, a privileged port, or a bad address is a
+	// real startup failure that Fx reports. Listening inside the goroutine with
+	// ListenAndServe would only log the error while the app kept claiming to run
+	// — an API that answers nothing and exits 0 is worse than one that refuses to
+	// start.
+	listener, err := net.Listen("tcp", s.http.Addr)
+	if err != nil {
+		return fmt.Errorf("listen on %s: %w", s.http.Addr, err)
+	}
+
 	s.logger.Info("http server starting",
-		zap.String("addr", s.http.Addr),
+		zap.String("addr", listener.Addr().String()),
 		zap.String("env", s.cfg.Env()),
 		zap.String("version", s.cfg.App.Version),
 	)
 
 	go func() {
-		if err := s.http.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := s.http.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			s.logger.Error("http server stopped unexpectedly", zap.Error(err))
 		}
 	}()
